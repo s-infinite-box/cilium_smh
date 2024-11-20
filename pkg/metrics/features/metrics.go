@@ -47,8 +47,10 @@ type Metrics struct {
 	ACLBExternalEnvoyProxyEnabled    metric.Vec[metric.Gauge]
 	ACLBCiliumNodeConfigEnabled      metric.Gauge
 
-	NPL3Ingested metric.Gauge
-	NPL3Present  metric.Gauge
+	NPL3Ingested     metric.Gauge
+	NPL3Present      metric.Gauge
+	NPHostNPIngested metric.Gauge
+	NPHostNPPresent  metric.Gauge
 }
 
 const (
@@ -530,6 +532,20 @@ func NewMetrics(withDefaults bool) Metrics {
 			Namespace: metrics.Namespace,
 			Subsystem: subsystemNP,
 			Name:      "l3_l4_policies_present",
+		}),
+
+		NPHostNPIngested: metric.NewGauge(metric.GaugeOpts{
+			Help:      "Host Network Policies have been ingested since the agent started",
+			Namespace: metrics.Namespace,
+			Subsystem: subsystemNP,
+			Name:      "host_network_policies_ingested",
+		}),
+
+		NPHostNPPresent: metric.NewGauge(metric.GaugeOpts{
+			Help:      "Host Network Policies are currently present in the agent",
+			Namespace: metrics.Namespace,
+			Subsystem: subsystemNP,
+			Name:      "host_network_policies_present",
 		}),
 	}
 }
