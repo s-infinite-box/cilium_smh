@@ -47,12 +47,16 @@ type Metrics struct {
 	ACLBExternalEnvoyProxyEnabled    metric.Vec[metric.Gauge]
 	ACLBCiliumNodeConfigEnabled      metric.Gauge
 
-	NPL3Ingested     metric.Gauge
-	NPL3Present      metric.Gauge
-	NPHostNPIngested metric.Gauge
-	NPHostNPPresent  metric.Gauge
-	NPDNSIngested    metric.Gauge
-	NPDNSPresent     metric.Gauge
+	NPL3Ingested                metric.Gauge
+	NPL3Present                 metric.Gauge
+	NPHostNPIngested            metric.Gauge
+	NPHostNPPresent             metric.Gauge
+	NPDNSIngested               metric.Gauge
+	NPDNSPresent                metric.Gauge
+	NPHTTPIngested              metric.Gauge
+	NPHTTPPresent               metric.Gauge
+	NPHTTPHeaderMatchesIngested metric.Gauge
+	NPHTTPHeaderMatchesPresent  metric.Gauge
 }
 
 const (
@@ -562,6 +566,34 @@ func NewMetrics(withDefaults bool) Metrics {
 			Namespace: metrics.Namespace,
 			Subsystem: subsystemNP,
 			Name:      "dns_policies_present",
+		}),
+
+		NPHTTPIngested: metric.NewGauge(metric.GaugeOpts{
+			Help:      "HTTP/GRPC Policies have been ingested since the agent started",
+			Namespace: metrics.Namespace,
+			Subsystem: subsystemNP,
+			Name:      "http_policies_ingested",
+		}),
+
+		NPHTTPPresent: metric.NewGauge(metric.GaugeOpts{
+			Help:      "HTTP/GRPC Policies are currently present in the agent",
+			Namespace: metrics.Namespace,
+			Subsystem: subsystemNP,
+			Name:      "http_policies_present",
+		}),
+
+		NPHTTPHeaderMatchesIngested: metric.NewGauge(metric.GaugeOpts{
+			Help:      "HTTP HeaderMatches Policies have been ingested since the agent started",
+			Namespace: metrics.Namespace,
+			Subsystem: subsystemNP,
+			Name:      "http_header_matches_policies_ingested",
+		}),
+
+		NPHTTPHeaderMatchesPresent: metric.NewGauge(metric.GaugeOpts{
+			Help:      "HTTP HeaderMatches Policies are currently present in the agent",
+			Namespace: metrics.Namespace,
+			Subsystem: subsystemNP,
+			Name:      "http_header_matches_policies_present",
 		}),
 	}
 }
