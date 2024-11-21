@@ -51,6 +51,8 @@ type Metrics struct {
 	NPL3Present      metric.Gauge
 	NPHostNPIngested metric.Gauge
 	NPHostNPPresent  metric.Gauge
+	NPDNSIngested    metric.Gauge
+	NPDNSPresent     metric.Gauge
 }
 
 const (
@@ -546,6 +548,20 @@ func NewMetrics(withDefaults bool) Metrics {
 			Namespace: metrics.Namespace,
 			Subsystem: subsystemNP,
 			Name:      "host_network_policies_present",
+		}),
+
+		NPDNSIngested: metric.NewGauge(metric.GaugeOpts{
+			Help:      "DNS Policies have been ingested since the agent started",
+			Namespace: metrics.Namespace,
+			Subsystem: subsystemNP,
+			Name:      "dns_policies_ingested",
+		}),
+
+		NPDNSPresent: metric.NewGauge(metric.GaugeOpts{
+			Help:      "DNS Policies are currently present in the agent",
+			Namespace: metrics.Namespace,
+			Subsystem: subsystemNP,
+			Name:      "dns_policies_present",
 		}),
 	}
 }
