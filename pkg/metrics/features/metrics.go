@@ -57,6 +57,8 @@ type Metrics struct {
 	NPHTTPPresent               metric.Gauge
 	NPHTTPHeaderMatchesIngested metric.Gauge
 	NPHTTPHeaderMatchesPresent  metric.Gauge
+	NPOtherL7Ingested           metric.Gauge
+	NPOtherL7Present            metric.Gauge
 }
 
 const (
@@ -594,6 +596,20 @@ func NewMetrics(withDefaults bool) Metrics {
 			Namespace: metrics.Namespace,
 			Subsystem: subsystemNP,
 			Name:      "http_header_matches_policies_present",
+		}),
+
+		NPOtherL7Ingested: metric.NewGauge(metric.GaugeOpts{
+			Help:      "Other L7 Policies have been ingested since the agent started",
+			Namespace: metrics.Namespace,
+			Subsystem: subsystemNP,
+			Name:      "other_l7_policies_ingested",
+		}),
+
+		NPOtherL7Present: metric.NewGauge(metric.GaugeOpts{
+			Help:      "Other L7 Policies are currently present in the agent",
+			Namespace: metrics.Namespace,
+			Subsystem: subsystemNP,
+			Name:      "other_l7_policies_present",
 		}),
 	}
 }
