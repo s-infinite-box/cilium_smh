@@ -73,6 +73,10 @@ type Metrics struct {
 	NPNonDefaultDenyPresent     metric.Gauge
 	NPLRPIngested               metric.Gauge
 	NPLRPPresent                metric.Gauge
+	NPCNPIngested               metric.Gauge
+	NPCNPPresent                metric.Gauge
+	NPCCNPIngested              metric.Gauge
+	NPCCNPPresent               metric.Gauge
 
 	ACLBInternalTrafficPolicyIngested        metric.Gauge
 	ACLBInternalTrafficPolicyPresent         metric.Gauge
@@ -729,6 +733,34 @@ func NewMetrics(withDefaults bool) Metrics {
 			Namespace: metrics.Namespace,
 			Subsystem: subsystemNP,
 			Name:      "local_redirect_policies_present",
+		}),
+
+		NPCNPIngested: metric.NewGauge(metric.GaugeOpts{
+			Help:      "Cilium Network Policies have been ingested since the agent started",
+			Namespace: metrics.Namespace,
+			Subsystem: subsystemNP,
+			Name:      "cilium_network_policies_ingested",
+		}),
+
+		NPCNPPresent: metric.NewGauge(metric.GaugeOpts{
+			Help:      "Cilium Network Policies are currently present in the agent",
+			Namespace: metrics.Namespace,
+			Subsystem: subsystemNP,
+			Name:      "cilium_network_policies_present",
+		}),
+
+		NPCCNPIngested: metric.NewGauge(metric.GaugeOpts{
+			Help:      "Cilium Clusterwide Network Policies have been ingested since the agent started",
+			Namespace: metrics.Namespace,
+			Subsystem: subsystemNP,
+			Name:      "cilium_clusterwide_network_policies_ingested",
+		}),
+
+		NPCCNPPresent: metric.NewGauge(metric.GaugeOpts{
+			Help:      "Cilium Clusterwide Network Policies are currently present in the agent",
+			Namespace: metrics.Namespace,
+			Subsystem: subsystemNP,
+			Name:      "cilium_clusterwide_network_policies_present",
 		}),
 
 		ACLBInternalTrafficPolicyIngested: metric.NewGauge(metric.GaugeOpts{
