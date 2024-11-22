@@ -46,6 +46,8 @@ type cecManager struct {
 
 	services  resource.Resource[*slim_corev1.Service]
 	endpoints resource.Resource[*k8s.Endpoints]
+
+	metricsManager CECMetrics
 }
 
 func newCiliumEnvoyConfigManager(logger logrus.FieldLogger,
@@ -57,6 +59,7 @@ func newCiliumEnvoyConfigManager(logger logrus.FieldLogger,
 	envoyConfigTimeout time.Duration,
 	services resource.Resource[*slim_corev1.Service],
 	endpoints resource.Resource[*k8s.Endpoints],
+	metricsManager CECMetrics,
 ) *cecManager {
 	return &cecManager{
 		logger:             logger,
@@ -68,10 +71,16 @@ func newCiliumEnvoyConfigManager(logger logrus.FieldLogger,
 		envoyConfigTimeout: envoyConfigTimeout,
 		services:           services,
 		endpoints:          endpoints,
+		metricsManager:     metricsManager,
 	}
 }
 
 func (r *cecManager) addCiliumEnvoyConfig(cecObjectMeta metav1.ObjectMeta, cecSpec *ciliumv2.CiliumEnvoyConfigSpec) error {
+	if cecObjectMeta.GetNamespace() == "" {
+		r.metricsManager.AddCCEC(cecSpec)
+	} else {
+		r.metricsManager.AddCEC(cecSpec)
+	}
 	resources, err := r.resourceParser.parseResources(
 		cecObjectMeta.GetNamespace(),
 		cecObjectMeta.GetName(),
@@ -434,6 +443,11 @@ func (r *cecManager) removeK8sServiceRedirects(resourceName service.L7LBResource
 }
 
 func (r *cecManager) deleteCiliumEnvoyConfig(cecObjectMeta metav1.ObjectMeta, cecSpec *ciliumv2.CiliumEnvoyConfigSpec) error {
+	if cecObjectMeta.GetNamespace() == "" {
+		r.metricsManager.DelCCEC(cecSpec)
+	} else {
+		r.metricsManager.DelCEC(cecSpec)
+	}
 	resources, err := r.resourceParser.parseResources(
 		cecObjectMeta.GetNamespace(),
 		cecObjectMeta.GetName(),
