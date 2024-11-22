@@ -59,6 +59,8 @@ type Metrics struct {
 	NPHTTPHeaderMatchesPresent  metric.Gauge
 	NPOtherL7Ingested           metric.Gauge
 	NPOtherL7Present            metric.Gauge
+	NPDenyPoliciesIngested      metric.Gauge
+	NPDenyPoliciesPresent       metric.Gauge
 }
 
 const (
@@ -610,6 +612,20 @@ func NewMetrics(withDefaults bool) Metrics {
 			Namespace: metrics.Namespace,
 			Subsystem: subsystemNP,
 			Name:      "other_l7_policies_present",
+		}),
+
+		NPDenyPoliciesIngested: metric.NewGauge(metric.GaugeOpts{
+			Help:      "Deny Policies have been ingested since the agent started",
+			Namespace: metrics.Namespace,
+			Subsystem: subsystemNP,
+			Name:      "deny_policies_ingested",
+		}),
+
+		NPDenyPoliciesPresent: metric.NewGauge(metric.GaugeOpts{
+			Help:      "Deny Policies are currently present in the agent",
+			Namespace: metrics.Namespace,
+			Subsystem: subsystemNP,
+			Name:      "deny_policies_present",
 		}),
 	}
 }
