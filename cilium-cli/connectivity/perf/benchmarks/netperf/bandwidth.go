@@ -39,12 +39,12 @@ func (s *netQos) Name() string {
 }
 
 func (s *netQos) Run(ctx context.Context, t *check.Test) {
-
+	perfParameters := t.Context().Params().PerfParameters
 	tests := []string{"TCP_STREAM"}
 	tputSum := map[string]uint64{}
 	var wg sync.WaitGroup
 
-	for sample := 1; sample <= 100; sample++ {
+	for sample := 1; sample <= perfParameters.Samples; sample++ {
 		for _, c := range t.Context().PerfClientPods() {
 			c := c
 			for _, server := range t.Context().PerfServerPod() {
@@ -62,7 +62,7 @@ func (s *netQos) Run(ctx context.Context, t *check.Test) {
 							Tool:     netQosToolName,
 							SameNode: sameNode,
 							Sample:   sample,
-							Duration: 30 * time.Second,
+							Duration: 120 * time.Second,
 							Scenario: scenarioName,
 							MsgSize:  1500000,
 						}

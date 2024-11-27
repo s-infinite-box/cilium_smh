@@ -5,9 +5,10 @@ on:
     - cron: '39 0 * * *'
 
 # For testing uncomment following lines:
-#  push:
-#    branches:
-#      - your_branch_name
+# TODO(hmalla): Remove this line before merging
+  push:
+    branches:
+      - hmalla/bw_prio
 
 permissions:
   # To be able to access the repository with actions/checkout
@@ -74,6 +75,7 @@ jobs:
           # Setup Cilium install options
           CILIUM_INSTALL_DEFAULTS="${{ steps.default_vars.outputs.cilium_install_defaults }} \
             --helm-set=cluster.name=${{ env.cluster_name }} \
+            --helm-set=bandwidthManager.enabled=true
             --wait=false"
 
           # Adding k8s.local to the end makes kops happy
@@ -130,14 +132,15 @@ jobs:
 
       - name: Deploy cluster
         id: deploy-cluster
-        uses: cilium/scale-tests-action/create-cluster@d3ecfd83003f3e9c98ba125ca14933401d44918f # main
+        uses: cilium/scale-tests-action/create-cluster@4201346d695353da9133f5303715bbb77304b522 # main
         timeout-minutes: 30
         with:
           cluster_name: ${{ steps.vars.outputs.cluster_name }}
           control_plane_size: n2-standard-4
           control_plane_count: 1
           node_size: e2-standard-8
-          node_count: 1
+          node_count: 2
+          image: "ubuntu-os-cloud/ubuntu-2404-noble-amd64-v20241115"
           kops_state: ${{ secrets.GCP_PERF_KOPS_STATE_STORE }}
           project_id: ${{ secrets.GCP_PERF_PROJECT_ID }}
 
@@ -179,6 +182,11 @@ jobs:
         run: |
           cilium status --wait
 
+      - name: Run Network QoS Tests
+        id: run-net-qos
+        run: |
+          kubectl get nodes -o wide && kubectl label nodes -l node-role.kubernetes.io/node perf-test=true && cilium connectivity perf --node-selector perf-test=true --net-qos --samples=100
+
       - name: Run CL2
         id: run-cl2
         working-directory: ./perf-tests/clusterloader2
@@ -205,7 +213,7 @@ jobs:
             2>&1 | tee cl2-output.txt
 
       - name: Get sysdump
-        if: ${{ always() && steps.run-cl2.outcome != 'skipped' }}
+        if: ${{ always() && (steps.run-cl2.outcome != 'skipped' || steps.run-net-qos.outcome != 'skipped') }}
         run: |
           cilium status
           cilium sysdump --output-filename cilium-sysdump-final
@@ -218,8 +226,8 @@ jobs:
           kops_state: ${{ secrets.GCP_PERF_KOPS_STATE_STORE }}
 
       - name: Export results and sysdump to GS bucket
-        if: ${{ always() && steps.run-cl2.outcome != 'skipped' }}
-        uses: cilium/scale-tests-action/export-results@d3ecfd83003f3e9c98ba125ca14933401d44918f # main
+        if: ${{ always() && (steps.run-cl2.outcome != 'skipped' || steps.run-net-qos.outcome != 'skipped') }}
+        uses: cilium/scale-tests-action/export-results@4201346d695353da9133f5303715bbb77304b522 # main
         with:
           test_name: ${{ env.test_name }}
           results_bucket: ${{ env.GCP_PERF_RESULTS_BUCKET }}
