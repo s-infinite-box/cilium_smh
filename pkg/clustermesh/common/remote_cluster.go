@@ -110,6 +110,13 @@ type remoteCluster struct {
 	metricLastFailureTimestamp prometheus.Gauge
 	metricReadinessStatus      prometheus.Gauge
 	metricTotalFailures        prometheus.Gauge
+
+	// featureMetrics will track which features are enabled with in clustermesh.
+	featureMetrics ClusterMeshMetrics
+
+	// featureMetricMaxClusters contains the max clusters defined for this
+	// clustermesh config.
+	featureMetricMaxClusters string
 }
 
 // releaseOldConnection releases the etcd connection to a remote cluster
@@ -122,6 +129,11 @@ func (rc *remoteCluster) releaseOldConnection() {
 	rc.mutex.Lock()
 	backend := rc.backend
 	rc.backend = nil
+	// if rc.config is nil then this remote cluster was already deleted and
+	// it wasn't re-added yet.
+	if rc.config != nil {
+		rc.featureMetrics.DelClusterMeshConfig(ClusterMeshMode(rc.config), rc.featureMetricMaxClusters)
+	}
 	rc.config = nil
 	rc.etcdClusterID = ""
 	rc.mutex.Unlock()
@@ -217,6 +229,7 @@ func (rc *remoteCluster) restartRemoteConnection() {
 				// would prevent a previous failure from being cleared out.
 				rc.wg.Add(1)
 				go func() {
+					rc.featureMetrics.AddClusterMeshConfig(ClusterMeshMode(rc.config), rc.featureMetricMaxClusters)
 					rc.Run(ctx, backend, config, ready)
 					cancel()
 					rc.wg.Done()

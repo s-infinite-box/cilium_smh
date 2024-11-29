@@ -4,8 +4,12 @@
 package features
 
 import (
+	"fmt"
+
+	"github.com/cilium/cilium/pkg/clustermesh/types"
 	datapathOption "github.com/cilium/cilium/pkg/datapath/option"
 	"github.com/cilium/cilium/pkg/datapath/tunnel"
+	"github.com/cilium/cilium/pkg/defaults"
 	ipamOption "github.com/cilium/cilium/pkg/ipam/option"
 	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/metrics/metric"
@@ -84,6 +88,8 @@ type Metrics struct {
 	ACLBCiliumEnvoyConfigPresent             metric.Gauge
 	ACLBCiliumClusterwideEnvoyConfigIngested metric.Gauge
 	ACLBCiliumClusterwideEnvoyConfigPresent  metric.Gauge
+
+	ACLBClusterMeshEnabled metric.Vec[metric.Gauge]
 }
 
 const (
@@ -118,6 +124,14 @@ const (
 
 	advConnExtEnvoyProxyStandalone = "standalone"
 	advConnExtEnvoyProxyEmbedded   = "embedded"
+
+	advConnClusterMeshMaxConnectedClusters255 = defaults.MaxConnectedClusters
+	advConnClusterMeshMaxConnectedClusters511 = types.ClusterIDExt511
+
+	advConnClusterMeshModeAPIServer    = "clustermesh-apiserver"
+	advConnClusterMeshModeETCD         = "etcd"
+	advConnClusterMeshModeKVStoreMesh  = "kvstoremesh"
+	advConnClusterMeshModeUndetectable = "undetectable"
 )
 
 var (
@@ -205,6 +219,18 @@ var (
 	defaultExternalEnvoyProxyModes = []string{
 		advConnExtEnvoyProxyStandalone,
 		advConnExtEnvoyProxyEmbedded,
+	}
+
+	defaultClusterMeshMode = []string{
+		advConnClusterMeshModeAPIServer,
+		advConnClusterMeshModeETCD,
+		advConnClusterMeshModeKVStoreMesh,
+		advConnClusterMeshModeUndetectable,
+	}
+
+	defaultClusterMeshMaxConnectedClusters = []string{
+		fmt.Sprintf("%d", advConnClusterMeshMaxConnectedClusters255),
+		fmt.Sprintf("%d", advConnClusterMeshMaxConnectedClusters511),
 	}
 )
 
@@ -803,6 +829,34 @@ func NewMetrics(withDefaults bool) Metrics {
 			Namespace: metrics.Namespace,
 			Subsystem: subsystemNP,
 			Name:      "cilium_clusterwide_envoy_config_present",
+		}),
+
+		ACLBClusterMeshEnabled: metric.NewGaugeVecWithLabels(metric.GaugeOpts{
+			Help:      "Clustermesh mode enabled on the agent",
+			Namespace: metrics.Namespace,
+			Subsystem: subsystemACLB,
+			Name:      "clustermesh_enabled",
+		}, metric.Labels{
+			{
+				Name: "mode", Values: func() metric.Values {
+					if !withDefaults {
+						return nil
+					}
+					return metric.NewValues(
+						defaultClusterMeshMode...,
+					)
+				}(),
+			},
+			{
+				Name: "max_connected_clusters", Values: func() metric.Values {
+					if !withDefaults {
+						return nil
+					}
+					return metric.NewValues(
+						defaultClusterMeshMaxConnectedClusters...,
+					)
+				}(),
+			},
 		}),
 	}
 }

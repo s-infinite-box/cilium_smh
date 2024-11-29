@@ -44,6 +44,14 @@ type Configuration struct {
 
 	// Metrics holds the different clustermesh metrics.
 	Metrics Metrics
+
+	// FeatureMetrics will track which features are enabled with in clustermesh.
+	FeatureMetrics ClusterMeshMetrics
+}
+
+type ClusterMeshMetrics interface {
+	AddClusterMeshConfig(mode string, maxClusters string)
+	DelClusterMeshConfig(mode string, maxClusters string)
 }
 
 type ClusterMesh interface {
@@ -155,6 +163,10 @@ func (cm *clusterMesh) newRemoteCluster(name, path string) *remoteCluster {
 		metricLastFailureTimestamp: cm.conf.Metrics.LastFailureTimestamp.WithLabelValues(cm.conf.ClusterInfo.Name, cm.conf.NodeName, name),
 		metricReadinessStatus:      cm.conf.Metrics.ReadinessStatus.WithLabelValues(cm.conf.ClusterInfo.Name, cm.conf.NodeName, name),
 		metricTotalFailures:        cm.conf.Metrics.TotalFailures.WithLabelValues(cm.conf.ClusterInfo.Name, cm.conf.NodeName, name),
+
+		featureMetrics: cm.conf.FeatureMetrics,
+
+		featureMetricMaxClusters: fmt.Sprintf("%d", cm.conf.ClusterInfo.MaxConnectedClusters),
 	}
 
 	rc.RemoteCluster = cm.conf.NewRemoteCluster(name, rc.status)
@@ -269,4 +281,26 @@ func (cm *clusterMesh) ForEachRemoteCluster(fn func(RemoteCluster) error) error 
 	}
 
 	return nil
+}
+
+const (
+	ClusterMeshModeClusterMeshAPIServer = "clustermesh-apiserver"
+	ClusterMeshModeETCD                 = "etcd"
+	ClusterMeshModeKVStoreMesh          = "kvstoremesh"
+	ClusterMeshModeUndetectable         = "undetectable"
+)
+
+// ClusterMeshMode returns the connection type made to the remote cluster.
+func ClusterMeshMode(rcc *models.RemoteClusterConfig) string {
+	if rcc == nil || !rcc.Retrieved {
+		return ClusterMeshModeUndetectable
+	}
+	switch {
+	case rcc.Kvstoremesh:
+		return ClusterMeshModeClusterMeshAPIServer
+	case !rcc.SyncCanaries:
+		return ClusterMeshModeETCD
+	default:
+		return ClusterMeshModeKVStoreMesh
+	}
 }

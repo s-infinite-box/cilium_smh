@@ -4,6 +4,7 @@
 package features
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -294,6 +295,61 @@ func TestCCNP(t *testing.T) {
 			assert.Equalf(t, tt.want.wantMetrics.npCCNPIngested, metrics.NPCCNPIngested.Get(), "NPCCNPIngested different")
 			assert.Equalf(t, float64(0), metrics.NPCCNPPresent.Get(), "NPCCNPPresent different")
 
+		})
+	}
+}
+
+func TestClusterMesh(t *testing.T) {
+	type testCase struct {
+		name        string
+		mode        string
+		maxClusters string
+
+		expectedMode        string
+		expectedMaxClusters string
+	}
+	var tests []testCase
+	for _, mode := range defaultClusterMeshMode {
+		for _, maxClusters := range defaultClusterMeshMaxConnectedClusters {
+			tests = append(tests, testCase{
+				name:        fmt.Sprintf("ClusterMesh %s - %s", mode, maxClusters),
+				mode:        mode,
+				maxClusters: maxClusters,
+
+				expectedMode:        mode,
+				expectedMaxClusters: maxClusters,
+			})
+		}
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+
+			// Check that only the expected mode's counter is incremented
+			for _, mode := range defaultClusterMeshMode {
+				for _, maxClusters := range defaultClusterMeshMaxConnectedClusters {
+
+					metrics := NewMetrics(true)
+					metrics.AddClusterMeshConfig(tt.mode, tt.maxClusters)
+
+					counter, err := metrics.ACLBClusterMeshEnabled.GetMetricWithLabelValues(mode, maxClusters)
+					assert.NoError(t, err)
+
+					counterValue := counter.Get()
+					if mode == tt.expectedMode &&
+						maxClusters == tt.expectedMaxClusters {
+						assert.Equal(t, float64(1), counterValue, "Expected mode %s - %s to be incremented", mode, maxClusters)
+					} else {
+						assert.Equal(t, float64(0), counterValue, "Expected mode %s - %s to remain at 0", mode, maxClusters)
+					}
+					metrics.DelClusterMeshConfig(tt.mode, tt.maxClusters)
+					counter, err = metrics.ACLBClusterMeshEnabled.GetMetricWithLabelValues(mode, maxClusters)
+					assert.NoError(t, err)
+
+					counterValue = counter.Get()
+					assert.Equal(t, float64(0), counterValue, "Expected mode %s - %s to remain at 0", mode, maxClusters)
+				}
+			}
 		})
 	}
 }
