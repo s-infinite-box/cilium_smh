@@ -940,16 +940,27 @@ func TestErrorResolver(t *testing.T) {
 	}
 }
 
+func TestBatchIteratorTypes(t *testing.T) {
+	m := NewMap("cilium_test",
+		ebpf.Array,
+		&TestKey{},
+		&TestValue{}, 1, 0)
+	iter := NewBatchIterator[TestKey, TestValue](m)
+	iter.IterateAll(context.TODO())
+	assert.Error(t, iter.Err())
+}
+
 func TestBatchIterator(t *testing.T) {
 	testutils.PrivilegedTest(t)
 
-	runTest := func(size, mapSize int, t *testing.T, opts ...BatchIteratorOpt[TestKey, TestValue, *TestKey, *TestValue]) {
+	runTest := func(mapType ebpf.MapType, size, mapSize int, t *testing.T, opts ...BatchIteratorOpt[TestKey, TestValue, *TestKey, *TestValue]) {
 		m := NewMap("cilium_test",
-			ebpf.Hash,
+			mapType,
 			&TestKey{},
 			&TestValue{},
 			mapSize,
-			BPF_F_NO_PREALLOC,
+			//BPF_F_NO_PREALLOC,
+			0,
 		)
 		assert.NoError(t, m.OpenOrCreate())
 		defer assert.NoError(t, m.UnpinIfExists())
@@ -1011,7 +1022,10 @@ func TestBatchIterator(t *testing.T) {
 		},
 	} {
 		t.Run(fmt.Sprintf("size=%d mapSize=%d", test.size, test.mapSize), func(t *testing.T) {
-			runTest(test.size, test.mapSize, t, test.opts...)
+			runTest(ebpf.Hash, test.size, test.mapSize, t, test.opts...)
+		})
+		t.Run(fmt.Sprintf("size=%d mapSize=%d", test.size, test.mapSize), func(t *testing.T) {
+			runTest(ebpf.LRUHash, test.size, test.mapSize, t, test.opts...)
 		})
 	}
 }
