@@ -66,13 +66,9 @@ type GC struct {
 	perClusterCTMapsRetriever PerClusterCTMapsRetriever
 	controllerManager         *controller.Manager
 
-	observable4 stream.Observable[ctmap.GCEvent]
-	next4       func(ctmap.GCEvent)
-	complete4   func(error)
-
-	observable6 stream.Observable[ctmap.GCEvent]
-	next6       func(ctmap.GCEvent)
-	complete6   func(error)
+	observable stream.Observable[ctmap.GCEvent]
+	next       func(ctmap.GCEvent)
+	complete   func(error)
 }
 
 func New(params parameters) *GC {
@@ -91,15 +87,12 @@ func New(params parameters) *GC {
 		controllerManager: controller.NewManager(),
 	}
 
-	gc.observable4, gc.next4, gc.complete4 = stream.Multicast[ctmap.GCEvent]()
-	gc.observable6, gc.next6, gc.complete6 = stream.Multicast[ctmap.GCEvent]()
+	gc.observable, gc.next, gc.complete = stream.Multicast[ctmap.GCEvent]()
 
 	params.Lifecycle.Append(cell.Hook{
 		// OnStart not yet defined pending further modularization of CT map GC.
 		OnStop: func(cell.HookContext) error {
 			gc.controllerManager.RemoveAllAndWait()
-			gc.complete4(nil)
-			gc.complete6(nil)
 			return nil
 		},
 	})
@@ -259,15 +252,11 @@ func (gc *GC) Enable() {
 }
 
 func (gc *GC) Run(m *ctmap.Map, filter ctmap.GCFilter) (int, error) {
-	return ctmap.GC(m, filter, gc.next4, gc.next6)
+	return ctmap.GC(m, filter, gc.next)
 }
 
 func (gc *GC) Observe4() stream.Observable[ctmap.GCEvent] {
 	return gc.observable4
-}
-
-func (gc *GC) Observe6() stream.Observable[ctmap.GCEvent] {
-	return gc.observable6
 }
 
 // runGC run CT's garbage collector for the given endpoint. `isLocal` refers if

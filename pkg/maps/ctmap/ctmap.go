@@ -11,8 +11,8 @@ import (
 	"math"
 	"net/netip"
 	"os"
-	"reflect"
 	"strings"
+	"sync"
 
 	"github.com/cilium/ebpf"
 	"github.com/sirupsen/logrus"
@@ -20,6 +20,7 @@ import (
 	"github.com/cilium/cilium/api/v1/models"
 	"github.com/cilium/cilium/pkg/bpf"
 	"github.com/cilium/cilium/pkg/controller"
+	"github.com/cilium/cilium/pkg/datapath/linux/probes"
 	"github.com/cilium/cilium/pkg/defaults"
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging"
@@ -378,26 +379,67 @@ func newMap(mapName string, m mapType) *Map {
 	return result
 }
 
-func purgeCtEntry6(m *Map, key CtKey, entry *CtEntry, natMap *nat.Map, next func(GCEvent)) error {
-	err := m.Delete(key)
-	if err != nil {
-		return err
+// doGCForFamily iterates through a CTv6 map and drops entries based on the given
+// filter.
+func doGCForFamily(m *Map, filter GCFilter, next func(GCEvent), ipv6 bool) gcStats {
+	family := nat.IPv4
+	if ipv6 {
+		family = nat.IPv6
 	}
 
-	t := key.GetTupleKey()
-	tupleType := t.GetFlags()
+	var natMap *nat.Map
 
-	if tupleType == tuple.TUPLE_F_SERVICE && ACT != nil {
-		ACT.CountFailed6(entry.RevNAT, uint32(entry.BackendID))
+	if m.clusterID == 0 {
+		// global map handling
+		ctMap := mapInfo[m.mapType]
+		if ctMap.natMapLock != nil {
+			ctMap.natMapLock.Lock()
+			defer ctMap.natMapLock.Unlock()
+		}
+		natMap = ctMap.natMap
+	} else {
+		// per-cluster map handling
+		natm, err := nat.GetClusterNATMap(m.clusterID, family)
+		if err != nil {
+			log.WithError(err).Error("Unable to get per-cluster NAT map")
+		} else {
+			natMap = natm
+		}
 	}
 
-	next(GCEvent{
-		Key:    key,
-		Entry:  entry,
-		NatMap: natMap,
-	})
+	stats := statStartGc(m)
+	defer stats.finish()
 
-	return nil
+	if natMap != nil {
+		err := natMap.Open()
+		if err == nil {
+			defer natMap.Close()
+		} else {
+			natMap = nil
+		}
+	}
+
+	globalDeleteLock[m.mapType].Lock()
+	if ipv6 {
+
+		if m.mapType.isGlobal() {
+			filterCallback := cleanup[CtKey6Global, CtEntry](m, filter, natMap, &stats, next, true)
+			stats.dumpError = iterate[CtKey6Global, CtEntry](m, &stats, filterCallback)
+		} else {
+			filterCallback := cleanup[CtKey6, CtEntry](m, filter, natMap, &stats, next, true)
+			stats.dumpError = iterate[CtKey6, CtEntry](m, &stats, filterCallback)
+		}
+	} else {
+		if m.mapType.isGlobal() {
+			filterCallback := cleanup[CtKey4Global, CtEntry](m, filter, natMap, &stats, next, true)
+			stats.dumpError = iterate[CtKey4Global, CtEntry](m, &stats, filterCallback)
+		} else {
+			filterCallback := cleanup[CtKey4, CtEntry](m, filter, natMap, &stats, next, true)
+			stats.dumpError = iterate[CtKey4, CtEntry](m, &stats, filterCallback)
+		}
+	}
+	globalDeleteLock[m.mapType].Unlock()
+	return stats
 }
 
 // doGC6 iterates through a CTv6 map and drops entries based on the given
@@ -435,63 +477,20 @@ func doGC6(m *Map, filter GCFilter, next func(GCEvent)) gcStats {
 		}
 	}
 
-	filterCallback := func(key bpf.MapKey, value bpf.MapValue) {
-		entry := value.(*CtEntry)
-
-		switch obj := key.(type) {
-		case *CtKey6Global:
-			currentKey6Global := obj
-			// In CT entries, the source address of the conntrack entry (`SourceAddr`) is
-			// the destination of the packet received, therefore it's the packet's
-			// destination IP
-			action := filter.doFiltering(currentKey6Global.DestAddr.Addr(), currentKey6Global.SourceAddr.Addr(),
-				currentKey6Global.DestPort, currentKey6Global.SourcePort,
-				uint8(currentKey6Global.NextHeader), currentKey6Global.Flags, entry)
-
-			switch action {
-			case deleteEntry:
-				err := purgeCtEntry6(m, currentKey6Global, entry, natMap, next)
-				if err != nil {
-					log.WithError(err).WithField(logfields.Key, currentKey6Global.String()).Error("Unable to delete CT entry")
-				} else {
-					stats.deleted++
-				}
-			default:
-				stats.aliveEntries++
-			}
-		case *CtKey6:
-			currentKey6 := obj
-			// In CT entries, the source address of the conntrack entry (`SourceAddr`) is
-			// the destination of the packet received, therefore it's the packet's
-			// destination IP
-			action := filter.doFiltering(currentKey6.DestAddr.Addr(), currentKey6.SourceAddr.Addr(),
-				currentKey6.DestPort, currentKey6.SourcePort,
-				uint8(currentKey6.NextHeader), currentKey6.Flags, entry)
-
-			switch action {
-			case deleteEntry:
-				err := purgeCtEntry6(m, currentKey6, entry, natMap, next)
-				if err != nil {
-					log.WithError(err).WithField(logfields.Key, currentKey6.String()).Error("Unable to delete CT entry")
-				} else {
-					stats.deleted++
-				}
-			default:
-				stats.aliveEntries++
-			}
-		default:
-			log.Warningf("Encountered unknown type while scanning conntrack table: %v", reflect.TypeOf(key))
-		}
-	}
-
 	// See doGC4() comment.
 	globalDeleteLock[m.mapType].Lock()
-	stats.dumpError = m.DumpReliablyWithCallback(filterCallback, stats.DumpStats)
+	if m.mapType.isGlobal() {
+		filterCallback := cleanup[CtKey6Global, CtEntry](m, filter, natMap, &stats, next, true)
+		stats.dumpError = iterate[CtKey6Global, CtEntry](m, &stats, filterCallback)
+	} else {
+		filterCallback := cleanup[CtKey6, CtEntry](m, filter, natMap, &stats, next, true)
+		stats.dumpError = iterate[CtKey6, CtEntry](m, &stats, filterCallback)
+	}
 	globalDeleteLock[m.mapType].Unlock()
 	return stats
 }
 
-func purgeCtEntry4(m *Map, key CtKey, entry *CtEntry, natMap *nat.Map, next func(event GCEvent)) error {
+func purgeCtEntry(m *Map, key CtKey, entry *CtEntry, natMap *nat.Map, next func(event GCEvent), actCountFailed func(uint16, uint32)) error {
 	err := m.Delete(key)
 	if err != nil {
 		return err
@@ -501,7 +500,7 @@ func purgeCtEntry4(m *Map, key CtKey, entry *CtEntry, natMap *nat.Map, next func
 	tupleType := t.GetFlags()
 
 	if tupleType == tuple.TUPLE_F_SERVICE && ACT != nil {
-		ACT.CountFailed4(entry.RevNAT, uint32(entry.BackendID))
+		actCountFailed(entry.RevNAT, uint32(entry.BackendID))
 	}
 
 	next(GCEvent{
@@ -513,95 +512,93 @@ func purgeCtEntry4(m *Map, key CtKey, entry *CtEntry, natMap *nat.Map, next func
 	return nil
 }
 
-// doGC4 iterates through a CTv4 map and drops entries based on the given
-// filter.
-func doGC4(m *Map, filter GCFilter, next func(GCEvent)) gcStats {
-	var natMap *nat.Map
+// Pointer[KT] is a pointer to a thing that satisfies MapKey.
+type KeyPointer[T any] interface {
+	bpf.MapKey
+	*T
+}
+type ValuePointer[T any] interface {
+	bpf.MapValue
+	*T
+}
 
-	if m.clusterID == 0 {
-		// global map handling
-		ctMap := mapInfo[m.mapType]
-		if ctMap.natMapLock != nil {
-			ctMap.natMapLock.Lock()
-			defer ctMap.natMapLock.Unlock()
+var (
+	batchAPISupported     bool
+	batchAPISupportedOnce sync.Once
+)
+
+func isBatchAPISupported() bool {
+	batchAPISupportedOnce.Do(func() {
+		err := probes.HaveBatchAPI()
+		batchAPISupported = !errors.Is(err, probes.ErrNotSupported)
+		if !batchAPISupported {
+			log.WithError(err).Info("kernel does not support batch iteration for ctmap gc")
 		}
-		natMap = ctMap.natMap
-	} else {
-		// per-cluster map handling
-		natm, err := nat.GetClusterNATMap(m.clusterID, nat.IPv4)
-		if err != nil {
-			log.WithError(err).Error("Unable to get per-cluster NAT map")
-		} else {
-			natMap = natm
-		}
+	})
+	return batchAPISupported
+}
+
+func iterate[KT any, VT any, KP bpf.KeyPointer[KT], VP bpf.ValuePointer[VT]](m *Map, stats *gcStats, filterCallback func(key bpf.MapKey, value bpf.MapValue)) error {
+	// Note: We can drop this once the minimum supported kernel version has batch iteration (i.e. >=5.6).
+	if isBatchAPISupported() {
+		return m.DumpReliablyWithCallback(filterCallback, stats.DumpStats)
 	}
 
-	stats := statStartGc(m)
-	defer stats.finish()
+	ctx := context.Background()
+	iter := bpf.NewBatchIterator[KT, VT, KP, VP](&m.Map)
+	for k, v := range iter.IterateAll(ctx) {
+		filterCallback(k, v)
+	}
+	return iter.Err()
+}
 
-	if natMap != nil {
-		if err := natMap.Open(); err == nil {
-			defer natMap.Close()
-		} else {
-			natMap = nil
+var _ tupleKeyAccessor = &tuple.TupleKey4{}
+var _ tupleKeyAccessor = &tuple.TupleKey6{}
+
+type tupleKeyAccessor interface {
+	GetDestAddr() netip.Addr
+	GetDestPort() uint16
+	GetSourceAddr() netip.Addr
+	GetSourcePort() uint16
+	GetNextHeader() u8proto.U8proto
+	GetFlags() uint8
+}
+
+func cleanup[KT any, VT any, KP bpf.KeyPointer[KT], VP bpf.ValuePointer[VT]](m *Map, filter GCFilter, natMap *nat.Map, stats *gcStats, next func(GCEvent), ipv6 bool) func(key bpf.MapKey, value bpf.MapValue) {
+	var countFailedFn func(uint16, uint32)
+	if ACT != nil {
+		countFailedFn = ACT.CountFailed4
+		if ipv6 {
+			countFailedFn = ACT.CountFailed6
 		}
 	}
-
-	filterCallback := func(key bpf.MapKey, value bpf.MapValue) {
+	return func(key bpf.MapKey, value bpf.MapValue) {
+		// TODO: These type assertions are a bit dangerous, make more of this well typed
+		// to avoid having to make these assertions.
+		tupleKey := key.(tupleKeyAccessor)
+		ctKey := key.(CtKey)
 		entry := value.(*CtEntry)
 
-		switch obj := key.(type) {
-		case *CtKey4Global:
-			currentKey4Global := obj
-			// In CT entries, the source address of the conntrack entry (`SourceAddr`) is
-			// the destination of the packet received, therefore it's the packet's
-			// destination IP
-			action := filter.doFiltering(currentKey4Global.DestAddr.Addr(), currentKey4Global.SourceAddr.Addr(),
-				currentKey4Global.DestPort, currentKey4Global.SourcePort,
-				uint8(currentKey4Global.NextHeader), currentKey4Global.Flags, entry)
+		// In CT entries, the source address of the conntrack entry (`SourceAddr`) is
+		// the destination of the packet received, therefore it's the packet's
+		// destination IP
+		action := filter.doFiltering(tupleKey.GetDestAddr(), tupleKey.GetSourceAddr(),
+			tupleKey.GetDestPort(), tupleKey.GetSourcePort(),
+			uint8(tupleKey.GetNextHeader()), tupleKey.GetFlags(), entry)
 
-			switch action {
-			case deleteEntry:
-				err := purgeCtEntry4(m, currentKey4Global, entry, natMap, next)
-				if err != nil {
-					log.WithError(err).WithField(logfields.Key, currentKey4Global.String()).Error("Unable to delete CT entry")
-				} else {
-					stats.deleted++
-				}
-			default:
-				stats.aliveEntries++
-			}
-		case *CtKey4:
-			currentKey4 := obj
-			// In CT entries, the source address of the conntrack entry (`SourceAddr`) is
-			// the destination of the packet received, therefore it's the packet's
-			// destination IP
-			action := filter.doFiltering(currentKey4.DestAddr.Addr(), currentKey4.SourceAddr.Addr(),
-				currentKey4.DestPort, currentKey4.SourcePort,
-				uint8(currentKey4.NextHeader), currentKey4.Flags, entry)
-
-			switch action {
-			case deleteEntry:
-				err := purgeCtEntry4(m, currentKey4, entry, natMap, next)
-				if err != nil {
-					log.WithError(err).WithField(logfields.Key, currentKey4.String()).Error("Unable to delete CT entry")
-				} else {
-					stats.deleted++
-				}
-			default:
-				stats.aliveEntries++
+		switch action {
+		case deleteEntry:
+			err := purgeCtEntry(m, ctKey, entry, natMap, next, countFailedFn)
+			if err != nil {
+				log.WithError(err).WithField(logfields.Key, ctKey.String()).Error("Unable to delete CT entry")
+			} else {
+				stats.deleted++
 			}
 		default:
-			log.Warningf("Encountered unknown type while scanning conntrack table: %v", reflect.TypeOf(key))
+			stats.aliveEntries++
 		}
-	}
 
-	// We serialize the deletions in order to avoid forced map walk restarts
-	// when keys are being evicted underneath us from concurrent goroutines.
-	globalDeleteLock[m.mapType].Lock()
-	stats.dumpError = m.DumpReliablyWithCallback(filterCallback, stats.DumpStats)
-	globalDeleteLock[m.mapType].Unlock()
-	return stats
+	}
 }
 
 func (f GCFilter) doFiltering(srcIP, dstIP netip.Addr, srcPort, dstPort uint16, nextHdr, flags uint8, entry *CtEntry) action {
@@ -624,34 +621,28 @@ func (f GCFilter) doFiltering(srcIP, dstIP netip.Addr, srcPort, dstPort uint16, 
 	return noAction
 }
 
-func doGC(m *Map, filter GCFilter, next4 func(GCEvent), next6 func(GCEvent)) (int, error) {
-	if m.mapType.isIPv6() {
-		stats := doGC6(m, filter, next6)
-		return int(stats.deleted), stats.dumpError
-	} else if m.mapType.isIPv4() {
-		stats := doGC4(m, filter, next4)
-		return int(stats.deleted), stats.dumpError
-	}
+func doGC(m *Map, filter GCFilter, next func(GCEvent)) (int, error) {
+	doGCForFamily(m, filter, next, m.mapType.isIPv6())
 	log.Fatalf("Unsupported ct map type: %s", m.mapType.String())
 	return 0, fmt.Errorf("unsupported ct map type: %s", m.mapType.String())
 }
 
 // GC runs garbage collection for map m with name mapType with the given filter.
 // It returns how many items were deleted from m.
-func GC(m *Map, filter GCFilter, next4 func(GCEvent), next6 func(GCEvent)) (int, error) {
+func GC(m *Map, filter GCFilter, next func(GCEvent)) (int, error) {
 	if filter.RemoveExpired {
 		t, _ := timestamp.GetCTCurTime(timestamp.GetClockSourceFromOptions())
 		filter.Time = uint32(t)
 	}
 
-	return doGC(m, filter, next4, next6)
+	return doGC(m, filter, next)
 }
 
 // PurgeOrphanNATEntries removes orphan SNAT entries. We call an SNAT entry
 // orphan if it does not have a corresponding CT entry.
 //
 // Typically NAT entries should get removed along with their owning CT entry,
-// as part of purgeCtEntry*(). But stale NAT entries can get left behind if the
+// as part of purgeCtEntry(). But stale NAT entries can get left behind if the
 // CT entry disappears for other reasons - for instance by LRU eviction, or
 // when the datapath re-purposes the CT entry.
 //
@@ -743,11 +734,11 @@ func PurgeOrphanNATEntries(ctMapTCP, ctMapAny *Map) *NatGCStats {
 
 // Flush runs garbage collection for map m with the name mapType, deleting all
 // entries. The specified map must be already opened using bpf.OpenMap().
-func (m *Map) Flush(next4 func(GCEvent), next6 func(GCEvent)) int {
+func (m *Map) Flush(next func(GCEvent)) int {
 	d, _ := doGC(m, GCFilter{
 		RemoveExpired: true,
 		Time:          MaxTime,
-	}, next4, next6)
+	}, next)
 
 	return d
 }

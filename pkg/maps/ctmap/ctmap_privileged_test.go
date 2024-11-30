@@ -108,12 +108,9 @@ func Benchmark_MapUpdate(b *testing.B) {
 	require.NoError(b, err)
 
 	observable4, next4, complete4 := stream.Multicast[GCEvent]()
-	observable6, next6, complete6 := stream.Multicast[GCEvent]()
 	observable4.Observe(context.Background(), NatMapNext4, func(error) {})
-	observable6.Observe(context.Background(), NatMapNext6, func(error) {})
-	t := m.Flush(next4, next6)
+	t := m.Flush(next4)
 	complete4(nil)
-	complete6(nil)
 
 	require.Equal(b, b.N, t)
 }
@@ -222,7 +219,7 @@ func TestCtGcIcmp(t *testing.T) {
 	}
 	mcast, next, complete := stream.Multicast[GCEvent]()
 	mcast.Observe(context.Background(), NatMapNext4, func(err error) {})
-	stats := doGC4(ctMap, filter, next)
+	stats := doGCForFamily(ctMap, filter, next, false)
 	complete(nil)
 	require.Equal(t, uint32(0), stats.aliveEntries)
 	require.Equal(t, uint32(1), stats.deleted)
@@ -336,7 +333,7 @@ func TestCtGcTcp(t *testing.T) {
 	}
 	mcast, next, complete := stream.Multicast[GCEvent]()
 	mcast.Observe(context.Background(), NatMapNext4, func(err error) {})
-	stats := doGC4(ctMap, filter, next)
+	stats := doGCForFamily(ctMap, filter, next, false)
 	complete(nil)
 	require.Equal(t, uint32(0), stats.aliveEntries)
 	require.Equal(t, uint32(1), stats.deleted)
@@ -430,7 +427,7 @@ func TestCtGcDsr(t *testing.T) {
 	}
 	mcast, next, complete := stream.Multicast[GCEvent]()
 	mcast.Observe(context.Background(), NatMapNext4, func(err error) {})
-	stats := doGC4(ctMap, filter, next)
+	stats := doGCForFamily(ctMap, filter, next, false)
 	complete(nil)
 	require.Equal(t, uint32(0), stats.aliveEntries)
 	require.Equal(t, uint32(1), stats.deleted)
